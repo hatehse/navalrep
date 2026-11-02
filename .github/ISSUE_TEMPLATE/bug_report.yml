@@ -1,0 +1,47 @@
+name: Ошибка
+description: Сообщить об ошибке установки, анализа или монтажа
+title: "[Ошибка] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Опишите воспроизводимую проблему. Не публикуйте токены, личные пути или другие чувствительные данные из логов. Исходное видео прикладывать не обязательно.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Ожидаемое и фактическое поведение
+      description: Что должно было произойти и что произошло?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Как воспроизвести
+      description: Команда запуска, этап сбоя и существенные параметры конфигурации без личных данных. Если подходит, используйте синтетический пример.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Окружение
+      description: ОС, версия Python и FFmpeg, модель GPU, NVIDIA-драйвер и CUDA/cuDNN. Для CPU-проверки явно укажите отсутствие GPU.
+      placeholder: |
+        ОС:
+        Python:
+        FFmpeg:
+        GPU / NVIDIA-драйвер:
+        CUDA / cuDNN:
+        Коммит или версия проекта:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Лог ошибки
+      description: Короткий фрагмент pipeline.log, report.json или вывода doctor. Удалите секреты, Telegram-ссылки и личные пути перед отправкой.
+      render: text
+  - type: textarea
+    id: checks
+    attributes:
+      label: Выполненные проверки
+      description: Какие команды проверены? Укажите пройденные, упавшие и пропущенные проверки отдельно.

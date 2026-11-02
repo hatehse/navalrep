@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "navalrep"
 version = "0.1.0"
 description = "Sequential, offline Spanish cliffhanger clip pipeline for an 8 GB NVIDIA GPU"
+readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
   "faster-whisper>=1.1,<2",
@@ -20,6 +21,10 @@ dependencies = [
 
 [project.scripts]
 navalrep = "navalrep.cli:main"
+
+[project.urls]
+Repository = "https://github.com/hatehse/navalrep"
+Issues = "https://github.com/hatehse/navalrep/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

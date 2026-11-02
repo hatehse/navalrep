@@ -13,3 +13,7 @@ temp/*
 !temp/.gitkeep
 models/
 *.log
+config.json
+.env
+.env.*
+!.env.example
