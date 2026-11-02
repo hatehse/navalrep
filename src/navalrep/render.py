@@ -211,10 +211,13 @@ def render_clip(
             ])
             if cue_count:
                 _prepare_ass(work, config)
+                # libass force_style uses legacy SSA alignment values: 10 is
+                # middle-center. ASS file styles use numpad 5 for that position,
+                # but passing 5 as an override instead places text at top-left.
                 style = (
                     f"FontName={config.font_name},FontSize={config.font_size},Bold=-1,"
                     "PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,"
-                    "BorderStyle=1,Outline=5,Shadow=1,Alignment=5,"
+                    "BorderStyle=1,Outline=5,Shadow=1,Alignment=10,"
                     "MarginL=65,MarginR=65,MarginV=65,WrapStyle=0"
                 )
                 filters.append(f"subtitles=filename=subtitles.ass:force_style='{style}'")

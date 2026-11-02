@@ -291,13 +291,67 @@ class CPUFFmpegFilterIntegrationTests(unittest.TestCase):
                         "-ss", "0.5", "-i", str(video), "-frames:v", "1",
                         "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
                     ], capture_output=True, check=True, timeout=15).stdout
-                    yellow = sum(frame[i] > 170 and frame[i + 1] > 140 and frame[i + 2] < 120
-                                 for i in range(0, len(frame), 3))
-                    self.assertGreater(yellow, 5)
+                    yellow = [(i // 3 % config.width, i // 3 // config.width)
+                              for i in range(0, len(frame), 3)
+                              if frame[i] > 170 and frame[i + 1] > 140 and frame[i + 2] < 120]
+                    self.assertGreater(len(yellow), 5)
+                    center_x = (min(x for x, _ in yellow) + max(x for x, _ in yellow)) / 2
+                    center_y = (min(y for _, y in yellow) + max(y for _, y in yellow)) / 2
+                    self.assertAlmostEqual(center_x, config.width / 2, delta=config.width * .05)
+                    self.assertAlmostEqual(center_y, config.height / 2, delta=config.height * .05)
                     self.assertFalse(any(p.name.startswith(".render-") for p in video.parent.iterdir()))
             self.assertEqual(len(production_commands), 2)
             for command in production_commands:
                 self.assertEqual(command[command.index("-c:v") + 1], "h264_nvenc")
+
+    def test_subtitles_are_centered_on_full_hd_vertical_canvas(self):
+        """Check actual glyph position, not merely the presence of yellow text."""
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            source = work / "blue-source.mp4"
+            subprocess.run([
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+                "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=1:d=40",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000:duration=40",
+                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+                "-c:a", "aac", str(source),
+            ], capture_output=True, check=True, timeout=45)
+            config = PipelineConfig(fps=1, threads=1)
+            real_run = render._run
+            requested_encoders = []
+
+            def cpu_encoder_adapter(command, cwd, timeout):
+                adapted = list(command)
+                if "-c:v" in adapted:
+                    requested_encoders.append(adapted[adapted.index("-c:v") + 1])
+                    self.assertEqual(requested_encoders[-1], "h264_nvenc")
+                    adapted[adapted.index("-c:v") + 1] = "libx264"
+                    adapted[adapted.index("-preset") + 1] = "ultrafast"
+                    for option in ("-rc", "-cq"):
+                        index = adapted.index(option)
+                        del adapted[index:index + 2]
+                real_run(adapted, cwd, timeout)
+
+            with patch.object(render, "_run", side_effect=cpu_encoder_adapter):
+                artifacts = render.render_clip(
+                    source, Clip(0, 36.4, 3, ()), Transcript((Word(0, 2, "¡No!"),), ()),
+                    work / "output", "centered", config,
+                )
+            self.assertEqual(requested_encoders, ["h264_nvenc"])
+            frame = subprocess.run([
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-ss", "0.5", "-i", artifacts["video"], "-frames:v", "1",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+            ], capture_output=True, check=True, timeout=20).stdout
+            self.assertEqual(len(frame), 1080 * 1920 * 3)
+            yellow = [(i // 3 % 1080, i // 3 // 1080)
+                      for i in range(0, len(frame), 3)
+                      if frame[i] > 170 and frame[i + 1] > 140 and frame[i + 2] < 120]
+            self.assertGreater(len(yellow), 100)
+            center_x = (min(x for x, _ in yellow) + max(x for x, _ in yellow)) / 2
+            center_y = (min(y for _, y in yellow) + max(y for _, y in yellow)) / 2
+            self.assertAlmostEqual(center_x, 540, delta=20)
+            self.assertAlmostEqual(center_y, 960, delta=20)
 
 
 if __name__ == "__main__":
