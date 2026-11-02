@@ -1,0 +1,16 @@
+{
+  "input_dir": "input",
+  "output_dir": "output",
+  "temp_dir": "temp",
+  "model_dir": "models/large-v3",
+  "offline": true,
+  "max_clips": 5,
+  "scene_threshold": 27.0,
+  "audio_peak_db": 7.0,
+  "min_score": 2.0,
+  "speed": 1.04,
+  "mirror": true,
+  "zoom": 1.08,
+  "telegram_url": "",
+  "hashtags": ["#Novelas", "#Drama", "#QuéPasó", "#ParaTi", "#Series"]
+}
