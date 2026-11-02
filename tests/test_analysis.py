@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 import importlib.util
+import multiprocessing
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -152,6 +154,35 @@ class MediaAnalysisTests(unittest.TestCase):
         self.assertTrue(child.closed)
         self.assertEqual(child.joins, [1, 10])
         self.assertEqual(list(self.root.glob("whisper-*")), [])
+
+    @unittest.skipUnless(available("faster_whisper", "torch"), "Requires faster-whisper and torch")
+    def test_real_whisper_worker_reports_model_failure_and_cleans_up(self):
+        """Exercise actual spawn/IPC/error cleanup without a model or GPU."""
+        audio = self.root / "preserved-audio.wav"
+        with wave.open(str(audio), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(16000)
+            output.writeframes(b"\0\0" * 4000)
+        original_audio = audio.read_bytes()
+        model = self.root / "empty-local-model"
+        model.mkdir()
+        config = replace(self.config, model_dir=model, offline=True, timeout=45)
+
+        # An existing local directory takes the loader's local path. Explicit
+        # offline flags also prohibit an accidental fallback to a download.
+        with patch.dict(os.environ, {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}):
+            with self.assertRaisesRegex(RuntimeError, r"^Whisper transcription failed:"):
+                transcribe(audio, config)
+
+        self.assertEqual(audio.read_bytes(), original_audio)
+        self.assertTrue(model.is_dir())
+        self.assertEqual(list(model.iterdir()), [])
+        self.assertEqual(list(self.root.glob("whisper-*")), [])
+        self.assertFalse([
+            child for child in multiprocessing.active_children()
+            if child.name == "whisper-sequential"
+        ])
 
 
 if __name__ == "__main__":
