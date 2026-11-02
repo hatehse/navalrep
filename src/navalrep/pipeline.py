@@ -57,8 +57,21 @@ def process_episode(source: Path, config: PipelineConfig) -> dict:
             report["stage"] = "audio extraction"
             extract_audio(source, audio, config)
             report["stage"] = "transcription"
-            LOG.info("%s: Whisper large-v3 / CUDA / float16", source.name)
+            LOG.info("%s: Whisper %s / %s / %s (beam=%s, CPU retry on CUDA OOM=%s)",
+                     source.name, config.whisper_model, config.device, config.compute_type,
+                     config.beam_size, config.device == "cuda" and config.cpu_fallback)
             transcript = transcribe(audio, config)
+            report["transcription"] = {
+                "model": config.whisper_model,
+                "requested_device": config.device,
+                "requested_compute_type": config.compute_type,
+                "device": transcript.device,
+                "compute_type": transcript.compute_type,
+                "cpu_fallback_used": config.device == "cuda" and transcript.device == "cpu",
+            }
+            LOG.info("%s: transcription finished on %s / %s", source.name,
+                     transcript.device or "unspecified test backend",
+                     transcript.compute_type or "unspecified test backend")
             # transcribe returns only AFTER the isolated model process has exited.
             report["stage"] = "audio analysis"
             LOG.info("%s: loudness analysis (CPU); Whisper process has exited", source.name)

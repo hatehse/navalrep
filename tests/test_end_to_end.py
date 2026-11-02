@@ -2,7 +2,8 @@
 
 The synthetic transcript is known input, not a speech recognition result. Only
 the requested h264_nvenc encoder is replaced for this test; production keeps
-CUDA/float16 and NVENC requirements. This cannot certify either GPU component.
+the configured Whisper memory policy and NVENC requirements. This cannot
+certify either GPU component.
 """
 
 import hashlib

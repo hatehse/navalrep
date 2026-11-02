@@ -14,6 +14,12 @@ def check_environment(config: PipelineConfig, *, encode_test: bool = True) -> li
     def record(name, ok, detail):
         checks.append({"name": name, "ok": bool(ok), "detail": detail})
 
+    record("Whisper memory policy", True,
+           f"{config.whisper_model}: {config.device}/{config.compute_type}, "
+           f"beam={config.beam_size}, CPU/int8 retry on CUDA OOM="
+           f"{config.device == 'cuda' and config.cpu_fallback}; "
+           "this describes settings, not a verified model load")
+
     for module in ("scenedetect", "cv2", "faster_whisper", "librosa", "soundfile", "numpy", "scipy", "torch"):
         record(module, importlib.util.find_spec(module) is not None, "Python dependency")
     for exe in (config.ffmpeg, config.ffprobe):

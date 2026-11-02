@@ -30,7 +30,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_validation_rejects_invalid_limits_and_unknown_keys(self):
         for kwargs in ({"min_duration": 34.0}, {"max_duration": 56.0}, {"speed": 0.0},
-                       {"width": 1920}, {"device": "cpu"}, {"threads": 0}, {"mirror": "yes"}):
+                       {"width": 1920}, {"device": "auto"}, {"threads": 0}, {"mirror": "yes"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 PipelineConfig(**kwargs)
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,7 +88,8 @@ class PipelineTests(unittest.TestCase):
             with patch("navalrep.pipeline.probe_media", return_value=MediaInfo(120, 1280, 720, True)), \
                  patch("navalrep.pipeline.detect_scenes", return_value=[0, 60, 120]), \
                  patch("navalrep.pipeline.extract_audio"), \
-                 patch("navalrep.pipeline.transcribe", return_value=Transcript((), (Segment(0, 120, "Hola"),))), \
+                 patch("navalrep.pipeline.transcribe", return_value=Transcript(
+                     (), (Segment(0, 120, "Hola"),), device="cpu", compute_type="int8_float32")), \
                  patch("navalrep.pipeline.analyze_audio", return_value=[]), \
                  patch("navalrep.pipeline.select_clips", return_value=clips), \
                  patch("navalrep.pipeline.render_clip", side_effect=[RuntimeError("NVENC error"), {"duration": 45.0}]) as render, \
@@ -97,6 +98,9 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(render.call_count, 2)
             self.assertEqual(reports[0]["status"], "partial")
             self.assertEqual(len(reports[0]["clips"]), 1)
+            self.assertEqual(reports[0]["transcription"]["device"], "cpu")
+            self.assertEqual(reports[0]["transcription"]["compute_type"], "int8_float32")
+            self.assertTrue(reports[0]["transcription"]["cpu_fallback_used"])
             self.assertFalse(list(config.temp_dir.iterdir()))
             saved = next(config.output_dir.glob("*/report.json"))
             self.assertEqual(json.loads(saved.read_text())["status"], "partial")

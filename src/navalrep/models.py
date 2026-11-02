@@ -20,6 +20,8 @@ class Transcript:
     words: tuple[Word, ...]
     segments: tuple[Segment, ...]
     language: str = "es"
+    device: str | None = None
+    compute_type: str | None = None
 
 
 @dataclass(frozen=True)

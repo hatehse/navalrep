@@ -6,6 +6,7 @@ keeps small overlapping blocks in RAM, even for a multi-hour source episode.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import gc
 import importlib.util
 import json
@@ -26,6 +27,25 @@ if TYPE_CHECKING:
     from .config import PipelineConfig
 
 LOGGER = logging.getLogger(__name__)
+
+
+class WhisperOutOfMemoryError(RuntimeError):
+    """A CUDA allocation failure explicitly reported by the inference worker."""
+
+
+def _is_cuda_oom(error: BaseException) -> bool:
+    """Recognize CUDA OOM without mistaking driver/model errors for memory pressure.
+
+    Host MemoryError and generic cuBLAS initialization/allocation failures are
+    intentionally excluded: moving those failures to CPU can hide a broken
+    installation or consume still more exhausted system RAM.
+    """
+    message = str(error).casefold()
+    return (
+        ("cuda" in message and "out of memory" in message)
+        or "cuda_error_out_of_memory" in message
+        or "cuda_error_memory_allocation" in message
+    )
 
 
 def _cuda_library_paths() -> list[str]:
@@ -149,9 +169,20 @@ def _whisper_worker(audio: str, config: PipelineConfig, result_path: str) -> Non
             for word in segment.words or ():
                 if word.end > word.start and word.word.strip():
                     words.append({"start": word.start, "end": word.end, "text": word.word.strip()})
-        payload = {"words": words, "segments": texts, "language": info.language}
+        payload = {
+            "words": words, "segments": texts, "language": info.language,
+            # CT2 may resolve generic int8 to int8_float32 on CPU. Report the
+            # effective backend, while the saved config retains the request.
+            "device": getattr(getattr(model, "model", None), "device", config.device),
+            "compute_type": getattr(getattr(model, "model", None), "compute_type", config.compute_type),
+        }
     except Exception as error:
-        payload = {"error": f"{type(error).__name__}: {error}", "traceback": traceback.format_exc()}
+        payload = {
+            "error": f"{type(error).__name__}: {error}",
+            "error_type": type(error).__name__,
+            "failure_kind": "cuda_oom" if config.device == "cuda" and _is_cuda_oom(error) else "inference_error",
+            "traceback": traceback.format_exc(),
+        }
     finally:
         try:
             _release_whisper(model, segments)
@@ -160,24 +191,25 @@ def _whisper_worker(audio: str, config: PipelineConfig, result_path: str) -> Non
         segments = None
         model = None
         gc.collect()
-        try:
-            import torch
+        if config.device == "cuda":
+            try:
+                import torch
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            # CTranslate2 has its own allocator. Process exit below also releases
-            # it when PyTorch was not installed in a minimal environment.
-            pass
-        except Exception:
-            LOGGER.warning("PyTorch CUDA cache cleanup failed; child process will exit", exc_info=True)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                # CTranslate2 has its own allocator. Process exit below also
+                # releases it in environments without PyTorch.
+                pass
+            except Exception:
+                LOGGER.warning("PyTorch CUDA cache cleanup failed; child process will exit", exc_info=True)
         for handle in dll_handles:
             handle.close()
     Path(result_path).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def transcribe(audio: Path, config: PipelineConfig) -> Transcript:
-    """Finish and join the Whisper child before returning any transcription.
+def _transcribe_once(audio: Path, config: PipelineConfig) -> Transcript:
+    """Finish and join one Whisper child before returning or raising an error.
 
     ``empty_cache`` alone cannot release CTranslate2's CUDA context. A spawned
     process provides a hard memory boundary before NVENC is allowed to start.
@@ -221,11 +253,14 @@ def transcribe(audio: Path, config: PipelineConfig) -> Transcript:
             payload = json.loads(result_path.read_text(encoding="utf-8"))
             if "error" in payload:
                 LOGGER.debug("Whisper worker traceback: %s", payload.get("traceback", ""))
-                raise RuntimeError(f"Whisper transcription failed: {payload['error']}")
+                error_class = WhisperOutOfMemoryError if payload.get("failure_kind") == "cuda_oom" else RuntimeError
+                raise error_class(f"Whisper transcription failed: {payload['error']}")
             return Transcript(
                 words=tuple(Word(**word) for word in payload["words"]),
                 segments=tuple(Segment(**segment) for segment in payload["segments"]),
                 language=payload["language"],
+                device=payload["device"],
+                compute_type=payload["compute_type"],
             )
         finally:
             if process.is_alive():
@@ -235,6 +270,31 @@ def transcribe(audio: Path, config: PipelineConfig) -> Transcript:
                     process.kill()
                     process.join()
             process.close()
+
+
+def transcribe(audio: Path, config: PipelineConfig) -> Transcript:
+    """Run sequential ASR, optionally retrying a CUDA OOM using CPU/system RAM.
+
+    CTranslate2 does not provide transparent layer offload between GPU VRAM and
+    system RAM. The CPU retry loads the same model afresh as INT8, only after the
+    failed GPU process has fully exited. It is slower and starts the episode's
+    transcription from the beginning. Other errors are never retried as OOM.
+    """
+    LOGGER.info(
+        "Whisper attempt: model=%s device=%s compute_type=%s beam_size=%s",
+        config.whisper_model, config.device, config.compute_type, config.beam_size,
+    )
+    try:
+        return _transcribe_once(audio, config)
+    except WhisperOutOfMemoryError:
+        if config.device != "cuda" or not config.cpu_fallback:
+            raise
+        LOGGER.warning(
+            "Whisper CUDA out of memory; the GPU worker has exited. Retrying the "
+            "same model on CPU/int8 using system RAM. This can be much slower."
+        )
+        cpu_config = replace(config, device="cpu", compute_type="int8", cpu_fallback=False)
+        return _transcribe_once(audio, cpu_config)
 
 
 def analyze_audio(audio: Path, config: PipelineConfig) -> list[AudioPeak]:

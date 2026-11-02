@@ -13,10 +13,11 @@ class PipelineConfig:
     model_dir: Path | None = None
     whisper_model: str = "large-v3"
     device: str = "cuda"
-    compute_type: str = "float16"
+    compute_type: str = "int8_float16"
     language: str = "es"
     offline: bool = True
-    beam_size: int = 5
+    beam_size: int = 1
+    cpu_fallback: bool = True
     cpu_threads: int = 4
     threads: int = 4
     timeout: int = 14400
@@ -87,8 +88,16 @@ class PipelineConfig:
             raise ValueError("speed must be 0.5..2, zoom 1..2")
         if self.width * 16 != self.height * 9 or self.width % 2 or self.height % 2:
             raise ValueError("Require even 9:16 output dimensions")
-        if self.device != "cuda" or self.compute_type != "float16" or self.language != "es":
-            raise ValueError("This workflow requires cuda / float16 / es")
+        supported_compute_types = {
+            "cuda": {"float16", "int8_float16"},
+            "cpu": {"int8", "int8_float32", "float32"},
+        }
+        if self.device not in supported_compute_types:
+            raise ValueError("device must be cuda or cpu")
+        if self.compute_type not in supported_compute_types[self.device]:
+            raise ValueError(f"Unsupported {self.device} compute_type: {self.compute_type}")
+        if self.language != "es":
+            raise ValueError("This workflow requires Spanish (es)")
         if self.nvenc_preset not in {f"p{i}" for i in range(1, 8)} or not 1 <= self.cq <= 51:
             raise ValueError("Invalid NVENC preset or CQ")
         if not 0 <= self.max_overlap < 1 or min(self.scene_threshold, self.audio_peak_db, self.peak_lookback, self.min_peak_gap) <= 0:
